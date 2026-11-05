@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Demo Mini-Do'kon</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 text-gray-800 p-4 pb-24">
+
+    <h1 class="text-2xl font-bold mb-4">🍔 Fast-Food Katalog</h1>
+
+    <!-- Katalog -->
+    <div id="catalog" class="grid grid-cols-2 gap-4"></div>
+
+    <!-- Buyurtma berish oynasi (Checkout Modal) -->
+    <div id="checkout-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl p-5 w-full max-w-md">
+            <h2 class="text-xl font-bold mb-3">Buyurtmani rasmiylashtirish</h2>
+            <div id="cart-summary" class="mb-4 text-sm text-gray-600"></div>
+
+            <input id="name" type="text" placeholder="Ismingiz" class="w-full border p-2 rounded mb-3">
+            <input id="phone" type="tel" placeholder="Telefon raqamingiz (+998...)" class="w-full border p-2 rounded mb-3">
+            
+            <!-- Geolokatsiya va Manzil qismi -->
+            <div class="mb-3">
+                <button type="button" onclick="getLocation()" id="loc-btn" class="w-full bg-blue-50 text-blue-600 border border-blue-300 py-2 rounded font-semibold mb-2 flex items-center justify-center gap-2">
+                    📍 Geolokatsiyani yuborish (GPS)
+                </button>
+                <p id="loc-status" class="text-xs text-green-600 hidden mb-2">✅ GPS koordinatalar olindi!</p>
+                <input id="address" type="text" placeholder="Qo'shimcha mo'ljal (kvartira, dom, qavat)" class="w-full border p-2 rounded">
+            </div>
+            
+            <select id="payment" class="w-full border p-2 rounded mb-4">
+                <option value="Naqd">💵 Naqd pul</option>
+                <option value="Karta (Perevod)">💳 Kartadan kartaga</option>
+                <option value="Click">🔵 Click</option>
+                <option value="Payme">🟢 Payme</option>
+            </select>
+
+            <div class="flex gap-2">
+                <button onclick="closeCheckout()" class="w-1/2 bg-gray-300 py-2 rounded font-semibold">Orqaga</button>
+                <button onclick="submitOrder()" class="w-1/2 bg-green-600 text-white py-2 rounded font-semibold">Tasdiqlash</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pastki Savat tugmasi -->
+    <div id="bottom-bar" class="hidden fixed bottom-0 left-0 right-0 bg-white border-t p-4 flex justify-between items-center shadow-lg">
+        <div>
+            <span class="text-sm text-gray-500">Jami:</span>
+            <p id="total-price" class="text-lg font-bold">0 so'm</p>
+        </div>
+        <button onclick="openCheckout()" class="bg-blue-600 text-white px-6 py-2 rounded-lg font-semibold">
+            Savatni ko'rish (<span id="cart-count">0</span>)
+        </button>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+
+        const products = [
+            { id: 1, name: "Gamburger", price: 28000, img: "https://via.placeholder.com/150?text=Burger" },
+            { id: 2, name: "Lavash Standart", price: 32000, img: "https://via.placeholder.com/150?text=Lavash" },
+            { id: 3, name: "Kartoshka Fri", price: 15000, img: "https://via.placeholder.com/150?text=Fri" },
+            { id: 4, name: "Coca-Cola 0.5L", price: 10000, img: "https://via.placeholder.com/150?text=Cola" }
+        ];
+
+        let cart = {};
+        let userCoords = null; // GPS koordinatalarni saqlash uchun
+
+        function renderCatalog() {
+            const container = document.getElementById('catalog');
+            container.innerHTML = '';
+            products.forEach(p => {
+                const count = cart[p.id] || 0;
+                container.innerHTML += `
+                    <div class="bg-white p-3 rounded-xl shadow flex flex-col justify-between">
+                        <img src="${p.img}" class="rounded-lg mb-2 w-full h-28 object-cover">
+                        <h3 class="font-semibold text-md">${p.name}</h3>
+                        <p class="text-blue-600 font-bold mb-2">${p.price.toLocaleString()} so'm</p>
+                        ${count === 0 ? 
+                            `<button onclick="changeQty(${p.id}, 1)" class="bg-blue-100 text-blue-700 py-1 rounded font-semibold">+ Savatga</button>` :
+                            `<div class="flex justify-between items-center bg-gray-100 rounded px-2 py-1">
+                                <button onclick="changeQty(${p.id}, -1)" class="font-bold text-lg px-2">-</button>
+                                <span>${count}</span>
+                                <button onclick="changeQty(${p.id}, 1)" class="font-bold text-lg px-2">+</button>
+                            </div>`
+                        }
+                    </div>
+                `;
+            });
+            updateBottomBar();
+        }
+
+        function changeQty(id, delta) {
+            cart[id] = (cart[id] || 0) + delta;
+            if (cart[id] <= 0) delete cart[id];
+            renderCatalog();
+        }
+
+        function updateBottomBar() {
+            let total = 0, count = 0;
+            for (let id in cart) {
+                const p = products.find(x => x.id == id);
+                total += p.price * cart[id];
+                count += cart[id];
+            }
+            document.getElementById('total-price').innerText = total.toLocaleString() + " so'm";
+            document.getElementById('cart-count').innerText = count;
+            document.getElementById('bottom-bar').classList.toggle('hidden', count === 0);
+        }
+
+        // GPS Geolokatsiya olish funksiyasi
+        function getLocation() {
+            const btn = document.getElementById('loc-btn');
+            const status = document.getElementById('loc-status');
+
+            if (!navigator.geolocation) {
+                alert("Qurilmangizda geolokatsiya qo'llab-quvvatlanmaydi.");
+                return;
+            }
+
+            btn.innerText = "⏳ Joylashuv aniqlanmoqda...";
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    userCoords = {
+                        lat: position.coords.latitude,
+                        lon: position.coords.longitude
+                    };
+                    btn.innerText = "✅ Joylashuv aniqlandi";
+                    btn.classList.replace("bg-blue-50", "bg-green-50");
+                    btn.classList.replace("text-blue-600", "text-green-700");
+                    status.classList.remove("hidden");
+                },
+                (error) => {
+                    btn.innerText = "📍 Qayta urinib ko'rish";
+                    alert("Joylashuvni aniqlab bo'lmadi. Telefoningizda GPS yoqilganligini tekshiring yoki manzilni qo'lda yozing.");
+                },
+                { enableHighAccuracy: true, timeout: 10000 }
+            );
+        }
+
+        function openCheckout() {
+            let summaryHtml = '';
+            for (let id in cart) {
+                const p = products.find(x => x.id == id);
+                summaryHtml += `<div class="flex justify-between"><span>${p.name} x ${cart[id]}</span><span>${(p.price * cart[id]).toLocaleString()} so'm</span></div>`;
+            }
+            document.getElementById('cart-summary').innerHTML = summaryHtml;
+            document.getElementById('checkout-modal').classList.remove('hidden');
+        }
+
+        function closeCheckout() {
+            document.getElementById('checkout-modal').classList.add('hidden');
+        }
+
+        function submitOrder() {
+            const name = document.getElementById('name').value.trim();
+            const phone = document.getElementById('phone').value.trim();
+            const address = document.getElementById('address').value.trim();
+            const payment = document.getElementById('payment').value;
+
+            if (!name || !phone || (!address && !userCoords)) {
+                alert("Iltimos, ism, telefon hamda GPS lokatsiya yoki manzilni kiriting!");
+                return;
+            }
+
+            let items = [];
+            let total = 0;
+            for (let id in cart) {
+                const p = products.find(x => x.id == id);
+                items.push({ name: p.name, qty: cart[id], price: p.price });
+                total += p.price * cart[id];
+            }
+
+            const orderData = {
+                name,
+                phone,
+                address: address || "Faqat GPS yuborildi",
+                payment,
+                items,
+                total,
+                location: userCoords // { lat: ..., lon: ... } yoki null
+            };
+            
+            tg.sendData(JSON.stringify(orderData));
+            tg.close();
+        }
+
+        renderCatalog();
+    </script>
+</body>
+</html>
