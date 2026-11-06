@@ -40,8 +40,8 @@
             </select>
 
             <div class="flex gap-2">
-                <button onclick="closeCheckout()" class="w-1/2 bg-gray-300 py-2 rounded font-semibold">Orqaga</button>
-                <button onclick="submitOrder()" class="w-1/2 bg-green-600 text-white py-2 rounded font-semibold">Tasdiqlash</button>
+                <button id="back-btn" onclick="closeCheckout()" class="w-1/2 bg-gray-300 py-2 rounded font-semibold">Orqaga</button>
+                <button id="submit-btn" onclick="submitOrder()" class="w-1/2 bg-green-600 text-white py-2 rounded font-semibold">Tasdiqlash</button>
             </div>
         </div>
     </div>
@@ -61,6 +61,9 @@
         const tg = window.Telegram.WebApp;
         tg.expand();
 
+        // SIZNING GOOGLE APPS SCRIPT HAVOLANGIZ SHU YERGA KIRITILDI:
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwXBOwRq1QXV1yq41e2EEEN3dFyoEH9PpNaolNQFzCN3dzwGVWi1cJyRz2G4sgn7erv/exec";
+
         const products = [
             { id: 1, name: "Gamburger", price: 28000, img: "https://via.placeholder.com/150?text=Burger" },
             { id: 2, name: "Lavash Standart", price: 32000, img: "https://via.placeholder.com/150?text=Lavash" },
@@ -69,7 +72,7 @@
         ];
 
         let cart = {};
-        let userCoords = null; // GPS koordinatalarni saqlash uchun
+        let userCoords = null;
 
         function renderCatalog() {
             const container = document.getElementById('catalog');
@@ -113,7 +116,6 @@
             document.getElementById('bottom-bar').classList.toggle('hidden', count === 0);
         }
 
-        // GPS Geolokatsiya olish funksiyasi
         function getLocation() {
             const btn = document.getElementById('loc-btn');
             const status = document.getElementById('loc-status');
@@ -137,7 +139,7 @@
                 },
                 (error) => {
                     btn.innerText = "📍 Qayta urinib ko'rish";
-                    alert("Joylashuvni aniqlab bo'lmadi. Telefoningizda GPS yoqilganligini tekshiring yoki manzilni qo'lda yozing.");
+                    alert("Joylashuvni aniqlab bo'lmadi. GPS yoqilganligini tekshiring.");
                 },
                 { enableHighAccuracy: true, timeout: 10000 }
             );
@@ -157,13 +159,13 @@
             document.getElementById('checkout-modal').classList.add('hidden');
         }
 
-        function submitOrder() {
+        async function submitOrder() {
             const name = document.getElementById('name').value.trim();
             const phone = document.getElementById('phone').value.trim();
-            const address = document.getElementById('address').value.trim();
+            const addressInput = document.getElementById('address').value.trim();
             const payment = document.getElementById('payment').value;
 
-            if (!name || !phone || (!address && !userCoords)) {
+            if (!name || !phone || (!addressInput && !userCoords)) {
                 alert("Iltimos, ism, telefon hamda GPS lokatsiya yoki manzilni kiriting!");
                 return;
             }
@@ -176,18 +178,47 @@
                 total += p.price * cart[id];
             }
 
+            // Agar GPS olingan bo'lsa, manzilga Google Maps linkini ham qo'shib yuboramiz
+            let finalAddress = addressInput || "Faqat GPS yuborildi";
+            if (userCoords) {
+                finalAddress += ` (Xarita: https://www.google.com/maps?q=${userCoords.lat},${userCoords.lon})`;
+            }
+
             const orderData = {
-                name,
-                phone,
-                address: address || "Faqat GPS yuborildi",
-                payment,
-                items,
-                total,
-                location: userCoords // { lat: ..., lon: ... } yoki null
+                name: name,
+                phone: phone,
+                address: finalAddress,
+                payment: payment,
+                items: items,
+                total: total,
+                location: userCoords
             };
-            
-            tg.sendData(JSON.stringify(orderData));
-            tg.close();
+
+            const submitBtn = document.getElementById('submit-btn');
+            submitBtn.disabled = true;
+            submitBtn.innerText = "⏳ Yuborilmoqda...";
+
+            try {
+                // Buyurtmani to'g'ridan-to'g'ri Google Sheets va Admin Guruhga yuborish
+                await fetch(GOOGLE_SCRIPT_URL, {
+                    method: "POST",
+                    mode: "no-cors",
+                    headers: {
+                        "Content-Type": "text/plain;charset=utf-8"
+                    },
+                    body: JSON.stringify(orderData)
+                });
+
+                alert("✅ Buyurtmangiz muvaffaqiyatli qabul qilindi!");
+                cart = {};
+                closeCheckout();
+                renderCatalog();
+                tg.close();
+            } catch (error) {
+                alert("Xatolik yuz berdi. Qaytadan urinib ko'ring.");
+                submitBtn.disabled = false;
+                submitBtn.innerText = "Tasdiqlash";
+            }
         }
 
         renderCatalog();
